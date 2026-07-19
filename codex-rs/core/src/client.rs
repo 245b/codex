@@ -130,6 +130,7 @@ use codex_model_provider::create_model_provider;
 #[cfg(test)]
 use codex_model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_model_provider_info::WireApi;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
@@ -251,6 +252,7 @@ impl RequestRouteTelemetry {
 #[derive(Debug, Clone)]
 pub struct ModelClient {
     state: Arc<ModelClientState>,
+    model_provider_id: String,
     agent_identity_policy: AgentIdentityAuthPolicy,
     prompt_cache_key_override: Option<String>,
     http_client_factory: HttpClientFactory,
@@ -452,10 +454,17 @@ impl ModelClient {
                 agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
             }),
+            model_provider_id: String::new(),
             agent_identity_policy,
             prompt_cache_key_override: None,
             http_client_factory,
         }
+    }
+
+    /// Records the configured provider key used for provider-specific wire compatibility.
+    pub fn with_model_provider_id(mut self, model_provider_id: impl Into<String>) -> Self {
+        self.model_provider_id = model_provider_id.into();
+        self
     }
 
     pub(crate) fn with_prompt_cache_key_override(
@@ -863,6 +872,32 @@ impl ModelClient {
             }
             input.splice(0..0, prefix);
             (String::new(), None)
+        } else if self.model_provider_id == OLLAMA_OSS_PROVIDER_ID {
+            // Ollama maps both the Responses `instructions` field and the initial developer
+            // context to system messages. Some embedded GGUF templates require a single leading
+            // system message, so combine those initial inputs in the request copy without
+            // rewriting stored conversation history.
+            if !prompt.base_instructions.text.is_empty() {
+                let base_instructions = ContentItem::InputText {
+                    text: prompt.base_instructions.text.clone(),
+                };
+                match input.first_mut() {
+                    Some(ResponseItem::Message { role, content, .. }) if role == "developer" => {
+                        content.insert(0, base_instructions);
+                    }
+                    _ => input.insert(
+                        0,
+                        ResponseItem::Message {
+                            id: None,
+                            role: "developer".to_string(),
+                            content: vec![base_instructions],
+                            phase: None,
+                            internal_chat_message_metadata_passthrough: None,
+                        },
+                    ),
+                }
+            }
+            (String::new(), Some(tools))
         } else {
             (prompt.base_instructions.text.clone(), Some(tools))
         };

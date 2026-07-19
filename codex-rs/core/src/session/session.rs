@@ -1126,6 +1126,7 @@ impl Session {
                     attestation_provider,
                     config.http_client_factory(),
                 )
+                .with_model_provider_id(config.model_provider_id.clone())
                 .with_prompt_cache_key_override(
                     crate::guardian::prompt_cache_key_override_for_review_session(
                         &session_configuration.session_source,

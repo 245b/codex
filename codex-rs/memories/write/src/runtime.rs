@@ -264,7 +264,8 @@ impl MemoryStartupContext {
             /*concurrent_reasoning_summaries_enabled*/ false,
             /*attestation_provider*/ None,
             config.http_client_factory(),
-        );
+        )
+        .with_model_provider_id(config.model_provider_id.clone());
 
         let mut client_session = model_client.new_session();
         let window_id = format!("{}:0", self.thread_id);
